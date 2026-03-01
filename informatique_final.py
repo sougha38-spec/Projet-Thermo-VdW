@@ -4,8 +4,14 @@ import plotly.graph_objects as go
 from scipy.optimize import brentq
 from scipy.signal import argrelextrema
 
+# ============================================================
+# Projet : Van der Waals + Construction de Maxwell (Streamlit)
+# - Version web : graphique interactif via Plotly
+# - Unités utilisées ici : P en bar, V en L/mol, T en K
+# ============================================================
+
 # ==========================================
-# CONFIGURATION ET DESIGN PROFESSIONNEL
+# CONFIGURATION ET DESIGN DE LA PAGE
 # ==========================================
 st.set_page_config(page_title="Modélisation des Gaz Réels", layout="wide")
 
@@ -21,7 +27,7 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { font-weight: bold; color: #1A237E; font-size: 1.05rem; }
     .stTabs [aria-selected="true"] { background-color: #1A237E !important; color: white !important; border-radius: 4px; }
     
-    /* Tableaux explicatifs (Reprise du style PDF) */
+    /* Tableaux explicatifs */
     table { width: 100%; border-collapse: collapse; margin-bottom: 20px; background-color: white; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 0.95rem; }
     th { background-color: #1A237E; color: white; padding: 10px; border: 1px solid #ddd; text-align: left; }
     td { padding: 10px; border: 1px solid #ddd; vertical-align: top; }
@@ -32,28 +38,38 @@ st.markdown("""
 # ==========================================
 # 1. MOTEUR PHYSIQUE ET MATHÉMATIQUE
 # ==========================================
-R = 0.08314 # L.bar/mol.K
+# Constante des gaz parfaits dans les unités choisies (L·bar·mol⁻¹·K⁻¹)
+R = 0.08314
 
 def P_vdw(V, T, a, b):
+    """Pression de Van der Waals."""
     return (R * T) / (V - b) - a / (V**2)
 
 def P_ideal(V, T):
+    """Pression d'un gaz parfait (référence de comparaison)."""
     return (R * T) / V
 
 def primitive_VdW(V, T, a, b):
+    """Primitive analytique de P_vdw(V) par rapport à V pour le calcul des aires."""
     return R * T * np.log(np.abs(V - b)) + a / V
 
 def difference_aires(P_test, T, a, b):
+    """Fonction objectif de Maxwell.
+    On impose : aire_courbe(VL→VG) - aire_rectangle = 0.
+    """
     coeffs = [P_test, -(P_test * b + R * T), a, -a * b]
     roots = np.roots(coeffs)
     r_reelles = np.sort(roots[np.isreal(roots)].real)
+    
     if len(r_reelles) < 3: 
         return 1e9
+        
     aire_courbe = primitive_VdW(r_reelles[2], T, a, b) - primitive_VdW(r_reelles[0], T, a, b)
     aire_rect = P_test * (r_reelles[2] - r_reelles[0])
     return aire_courbe - aire_rect
 
 def trouver_plateau(T, a, b):
+    """Trouve la pression de saturation Psat via la méthode de Brent."""
     v_scan = np.linspace(b + 0.001, max(1.5, b*100), 5000)
     p_scan = P_vdw(v_scan, T, a, b)
     
@@ -75,6 +91,7 @@ def trouver_plateau(T, a, b):
         return None
 
 def coordonnees_critiques(a, b):
+    """Calcule les constantes critiques théoriques."""
     Tc = (8 * a) / (27 * R * b)
     Vc = 3 * b
     Pc = a / (27 * b**2)
@@ -133,20 +150,16 @@ with tab_sim:
         T = st.slider("Température de l'isotherme (K)", 100.0, float(int(Tc_crit*1.5)), float(int(Tc_crit*0.85)))
         resultat = trouver_plateau(T, a, b)
         
-        # Gaz parfait en noir pointillé
         fig.add_trace(go.Scatter(x=V_plot, y=P_ideal(V_plot, T), line=dict(color='black', dash='dash', width=1.5), opacity=0.5, name="Gaz Parfait"))
 
         if resultat:
             P_sat, V_liq, V_mid, V_gaz = resultat
             
-            # VdW complet en Bleu (La courbe entière est dessinée)
             fig.add_trace(go.Scatter(x=V_plot, y=P_vdw(V_plot, T, a, b), line=dict(color='blue', width=2), opacity=0.5, name="Van der Waals",
                                      customdata=[T]*len(V_plot), hoverlabel=hover_style, hovertemplate="<b>VdW</b><br>T = %{customdata:.1f} K<br>V = %{x:.4f}<br>P = %{y:.2f} bar<extra></extra>"))
             
-            # Plateau en Rouge
             fig.add_trace(go.Scatter(x=[V_liq, V_gaz], y=[P_sat, P_sat], line=dict(color='red', width=3), name=f"Plateau de Saturation"))
             
-            # Aires de Maxwell (Orange et Vert)
             v_bosse = np.linspace(V_liq, V_mid, 100)
             x_bosse = np.concatenate([v_bosse, v_bosse[::-1]])
             y_bosse = np.concatenate([P_vdw(v_bosse, T, a, b), np.full_like(v_bosse, P_sat)])
@@ -157,7 +170,6 @@ with tab_sim:
             y_creux = np.concatenate([np.full_like(v_creux, P_sat), P_vdw(v_creux, T, a, b)[::-1]])
             fig.add_trace(go.Scatter(x=x_creux, y=y_creux, fill='toself', fillcolor='rgba(0, 128, 0, 0.4)', line=dict(width=0), name="Aire Supérieure", hoverinfo='skip'))
             
-            # Notification des points d'intersection (Liquide et Vapeur saturés)
             fig.add_trace(go.Scatter(x=[V_liq], y=[P_sat], mode='markers', marker=dict(color='blue', size=10, line=dict(color='black', width=1)), name="Liquide Saturé",
                                      hoverlabel=hover_style, hovertemplate="<b>Liquide Saturé</b><br>V = %{x:.4f} L/mol<br>P = %{y:.2f} bar<extra></extra>"))
             fig.add_trace(go.Scatter(x=[V_gaz], y=[P_sat], mode='markers', marker=dict(color='red', size=10, line=dict(color='black', width=1)), name="Vapeur Saturée",
@@ -186,22 +198,17 @@ with tab_sim:
                 ps, vl, vm, vg = res
                 l_vl.append(vl); l_vg.append(vg); l_psat.append(ps)
                 
-                # LA COURBE COMPLETE EN STEELBLUE SOUS LE PALIER
                 fig.add_trace(go.Scatter(x=V_plot, y=P_vdw(V_plot, T_i, a, b), mode='lines', line=dict(color='steelblue', width=1.2), opacity=0.5, showlegend=False, 
                                          customdata=[T_i]*len(V_plot), hoverlabel=hover_style, hovertemplate="<b>Isotherme</b><br>T = %{customdata:.1f} K<br>V = %{x:.4f}<br>P = %{y:.2f} bar<extra></extra>"))
-                # LE PALIER EN CRIMSON
                 fig.add_trace(go.Scatter(x=[vl, vg], y=[ps, ps], mode='lines', line=dict(color='crimson', width=2), showlegend=False, hoverinfo='skip'))
         
-        # BINODALE EN NOIR
         fig.add_trace(go.Scatter(x=l_vl + [Vc_crit] + l_vg[::-1], y=l_psat + [Pc_crit] + l_psat[::-1], line=dict(color='black', width=2.5, dash='dash'), name="Courbe Binodale"))
         
-        # POINTS D'INTERSECTION NOTIFIÉS
         fig.add_trace(go.Scatter(x=l_vl, y=l_psat, mode='markers', marker=dict(color='blue', size=8, line=dict(color='white', width=0.5)), name="Liquide saturé",
                                  hoverlabel=hover_style, customdata=temps_cloche, hovertemplate="<b>Liquide saturé</b><br>T = %{customdata:.1f} K<br>V = %{x:.4f}<br>P = %{y:.2f} bar<extra></extra>"))
         fig.add_trace(go.Scatter(x=l_vg, y=l_psat, mode='markers', marker=dict(color='red', size=8, line=dict(color='white', width=0.5)), name="Vapeur saturée",
                                  hoverlabel=hover_style, customdata=temps_cloche, hovertemplate="<b>Vapeur saturée</b><br>T = %{customdata:.1f} K<br>V = %{x:.4f}<br>P = %{y:.2f} bar<extra></extra>"))
         
-        # POINT CRITIQUE CLASSIQUE (Point noir plein)
         fig.add_trace(go.Scatter(x=[Vc_crit], y=[Pc_crit], mode='markers', marker=dict(color='black', size=12), name='Point Critique', 
                                  hoverlabel=hover_style, hovertemplate=f"<b>Point Critique</b><br>Tc = {Tc_crit:.1f} K<br>Vc = {Vc_crit:.4f}<br>Pc = {Pc_crit:.2f} bar<extra></extra>"))
         
@@ -211,7 +218,7 @@ with tab_sim:
     st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------------------------------------------------------------
-# ONGLET 2 : THÉORIE ET INTERPRÉTATION (TEXTE INTÉGRAL DU PDF)
+# ONGLET 2 : THÉORIE ET INTERPRÉTATION 
 # -------------------------------------------------------------------------------------
 with tab_theo:
     st.markdown("""
@@ -275,14 +282,28 @@ with tab_theo:
     ## Conclusion
     Ce projet a permis d'étudier le comportement des gaz réels à l'aide de l'équation de Van der Waals et de sa mise en œuvre numérique. Les diagrammes P=f(V) obtenus mettent en évidence la transition liquide-gaz pour T<Tc, la disparition de cette transition au point critique et le comportement supercritique pour T>Tc. L'application de la construction de Maxwell a permis de corriger la zone instable prédite par le modèle théorique et d'obtenir des courbes cohérentes avec la réalité physique. Ce travail illustre ainsi le lien entre théorie thermodynamique, calcul numérique et interprétation graphique.
     
+                
     </div>
     """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------------------------------
-# ONGLET 3 : EXPLICATION DU PROGRAMME
+# ONGLET 3 : ANALYSE DU PROGRAMME (STRATÉGIE + LIGNES CLÉS)
 # -------------------------------------------------------------------------------------
 with tab_methode:
-    st.markdown("### Explication détaillée du programme source")
+    st.markdown("## 5. Description détaillée du programme")
+    
+    st.markdown("""
+    <div class="content-card">
+    
+    ### Évolution technique : De Matplotlib à Plotly
+    Pourquoi avoir changé de bibliothèques par rapport à une version locale classique ? 
+    Dans un premier temps, le tracé des courbes s'effectuait via <code>matplotlib</code>. Cependant, pour permettre un déploiement web fluide et accessible à tous via <code>streamlit</code>, nous avons migré vers la bibliothèque <code>plotly.graph_objects</code>. 
+    Ce changement technique majeur permet d'obtenir des graphiques vectoriels natifs pour le web. Cela offre une interactivité indispensable pour l'utilisateur final : zoom fluide sans rechargement, affichage dynamique des coordonnées (T, V, P) au simple survol de la souris, et remplissage des aires de Maxwell grandement simplifié.
+    
+    <br>Le tableau ci-dessous présente l'explication ligne par ligne des commandes majeures utilisées pour construire le solveur mathématique et l'interface web interactive.
+    </div>
+    """, unsafe_allow_html=True)
+
     st.markdown("""
     <table>
         <tr>
@@ -292,91 +313,108 @@ with tab_methode:
         </tr>
         <tr>
             <td>1</td>
-            <td><code>import numpy as np</code></td>
-            <td>Permet d'utiliser la bibliothèque NumPy pour effectuer des calculs numériques efficaces, créer des tableaux de valeurs (volumes) et résoudre des équations polynomiales.</td>
+            <td><code>import streamlit as st</code></td>
+            <td>Génère l'interface web interactive (création de la page, barre latérale, onglets, curseurs).</td>
         </tr>
         <tr>
             <td>2</td>
-            <td><code>import matplotlib.pyplot as plt</code></td>
-            <td>Importe l'outil de visualisation graphique utilisé à l'origine pour tracer les courbes P=f(V).</td>
+            <td><code>import numpy as np</code></td>
+            <td>Permet d'utiliser NumPy pour effectuer des calculs numériques efficaces (créer le tableau des volumes et résoudre l'équation polynomiale).</td>
         </tr>
         <tr>
             <td>3</td>
-            <td><code>from scipy.optimize import brentq</code></td>
-            <td>Importe une méthode numérique de recherche de racine. Elle est utilisée pour déterminer la pression de saturation dans la construction de Maxwell en annulant une fonction.</td>
-        </tr>
-        <tr>
-            <td>4</td>
-            <td><code>import mplcursors</code></td>
-            <td>Permet d'ajouter une interactivité au graphique : lorsqu'un point est sélectionné, ses coordonnées (T, V, P) sont affichées.</td>
-        </tr>
-        <tr>
-            <td>6</td>
-            <td><code>def pression_vdw(...)</code></td>
-            <td>Définition de la fonction implémentant l'équation de Van der Waals. Permet d'isoler le calcul physique de la pression et de l'appeler facilement.</td>
-        </tr>
-        <tr>
-            <td>8</td>
-            <td><code>return (R*temp)/(v_array-b_val) - (a_val/(v_array**2))</code></td>
-            <td>Implémente directement la formule. Le premier terme corrige le volume disponible et le second terme prend en compte les forces attractives entre molécules.</td>
-        </tr>
-        <tr>
-            <td>10</td>
-            <td><code>def trouver_palier_maxwell(...)</code></td>
-            <td>Fonction dédiée à la détermination de la pression de saturation par la méthode de Maxwell lorsque l'isotherme présente une zone instable.</td>
-        </tr>
-        <tr>
-            <td>12-13</td>
-            <td><code>np.roots(coeffs_extrema)</code> / <code>argrelextrema</code></td>
-            <td>Détermine les extrema de l'isotherme (points correspondant au maximum et au minimum local) pour encadrer la recherche de la pression de saturation.</td>
-        </tr>
-        <tr>
-            <td>22</td>
-            <td><code>def difference_aires(P_test)</code></td>
-            <td>Définit la fonction représentant la différence entre l'aire sous l'isotherme et l'aire du rectangle associé à une pression donnée. L'égalité de ces deux aires est la condition de Maxwell.</td>
-        </tr>
-        <tr>
-            <td>32</td>
-            <td><code>P_sat = brentq(...)</code></td>
-            <td>Utilise la méthode numérique de Brent pour trouver la pression annulant la différence d'aires. Cette pression correspond à la pression de saturation.</td>
-        </tr>
-        <tr>
-            <td>82-84</td>
-            <td><code>Tc, Pc, Vc = coordonnees_critiques(a,b)</code></td>
-            <td>Calcule la température critique, la pression critique et le volume critique à partir des relations théoriques de Van der Waals.</td>
-        </tr>
-        <tr>
-            <td>87</td>
-            <td><code>v_scan = np.linspace(...)</code></td>
-            <td>Génère un ensemble de volumes régulièrement espacés pour tracer les isothermes. La valeur minimale est légèrement supérieure à b afin d'éviter une division par zéro.</td>
-        </tr>
-        <tr>
-            <td>120</td>
-            <td><code>plt.plot([V_L, V_G], [P_sat, P_sat]...)</code></td>
-            <td>Trace le palier horizontal correspondant à la transition liquide-gaz selon la construction de Maxwell.</td>
-        </tr>
-        <tr>
-            <td>124-126</td>
-            <td><code>plt.plot(vaste, psat, ...)</code></td>
-            <td>Construit et trace la courbe de saturation (binodale) reliant les états liquide et vapeur.</td>
-        </tr>
-        <tr style="background-color: #E3F2FD;">
-            <th colspan="3" style="color: #1A237E;">Bibliothèques d'Interface et Rendu Graphique (Adaptation Web)</th>
-        </tr>
-        <tr>
-            <td>Interface</td>
-            <td><code>import streamlit as st</code></td>
-            <td>Permet de générer l'interface utilisateur web interactive (définition de la barre latérale, configuration des onglets, sliders).</td>
-        </tr>
-        <tr>
-            <td>Graphiques</td>
             <td><code>import plotly.graph_objects as go</code></td>
-            <td>Remplace Matplotlib. Permet de générer des graphiques vectoriels qui affichent nativement des fenêtres de données (tooltips) complètes au survol de la souris sur une page web.</td>
+            <td>Importe l'outil de visualisation pour générer des graphiques vectoriels interactifs (zoom, et affichage des coordonnées T, V, P au survol de la souris).</td>
         </tr>
         <tr>
-            <td>Surfaces</td>
+            <td>4-5</td>
+            <td><code>from scipy... import brentq, argrelextrema</code></td>
+            <td>Importe les méthodes numériques pour trouver la racine exacte (annulation des aires) et détecter les extrema locaux (bosses et creux de la zone instable).</td>
+        </tr>
+        <tr>
+            <td>16</td>
+            <td><code>st.set_page_config(...)</code></td>
+            <td>Configure les paramètres globaux de la page web (titre dans le navigateur et affichage en pleine largeur).</td>
+        </tr>
+        <tr>
+            <td>31</td>
+            <td><code>def P_vdw(V, T, a, b):</code></td>
+            <td>Définition de la fonction implémentant l'équation de Van der Waals. Isole le calcul physique pour l'appeler facilement dans les boucles de tracés.</td>
+        </tr>
+        <tr>
+            <td>44</td>
+            <td><code>def difference_aires(P_test, ...)</code></td>
+            <td>Définit la fonction calculant la différence entre l'aire sous l'isotherme et l'aire du rectangle isobare. L'égalité de ces deux aires est la condition de Maxwell.</td>
+        </tr>
+        <tr>
+            <td>49</td>
+            <td><code>np.roots(coeffs)</code></td>
+            <td>Résout l'équation polynomiale de degré 3 pour trouver les trois volumes d'intersection exacts entre la courbe de Van der Waals et le palier de pression testé.</td>
+        </tr>
+        <tr>
+            <td>58</td>
+            <td><code>def trouver_plateau(T, a, b):</code></td>
+            <td>Fonction dédiée à la détermination du palier de Maxwell. Elle détecte d'abord l'instabilité, puis cherche la pression de saturation.</td>
+        </tr>
+        <tr>
+            <td>66</td>
+            <td><code>argrelextrema(p_scan, ...)</code></td>
+            <td>Identifie les extrema locaux de la courbe pour vérifier si l'isotherme possède une zone instable (ce qui arrive seulement si T < Tc).</td>
+        </tr>
+        <tr>
+            <td>75</td>
+            <td><code>Psat = brentq(...)</code></td>
+            <td>Utilise la méthode d'optimisation de Brent pour trouver la pression exacte qui annule la fonction <code>difference_aires</code>. C'est la pression de saturation.</td>
+        </tr>
+        <tr>
+            <td>89</td>
+            <td><code>with st.sidebar:</code></td>
+            <td>Crée un panneau latéral à gauche de l'écran pour regrouper proprement les paramètres interactifs de l'utilisateur.</td>
+        </tr>
+        <tr>
+            <td>94</td>
+            <td><code>st.selectbox(...)</code></td>
+            <td>Affiche un menu déroulant permettant à l'utilisateur de sélectionner un gaz pré-enregistré pour adapter automatiquement <i>a</i> et <i>b</i>.</td>
+        </tr>
+        <tr>
+            <td>116</td>
+            <td><code>st.tabs([...])</code></td>
+            <td>Sépare l'application en plusieurs onglets (Simulateur, Théorie, Analyse, Code) pour une navigation plus claire et fluide.</td>
+        </tr>
+        <tr>
+            <td>126</td>
+            <td><code>fig = go.Figure()</code></td>
+            <td>Initialise la fenêtre graphique interactive (équivalent moderne de <code>plt.figure()</code> pour le web).</td>
+        </tr>
+        <tr>
+            <td>131</td>
+            <td><code>T = st.slider(...)</code></td>
+            <td>Crée un curseur interactif. Chaque mouvement relance les calculs et met à jour le graphique et les valeurs en temps réel.</td>
+        </tr>
+        <tr>
+            <td>139-143</td>
+            <td><code>fig.add_trace(go.Scatter(...))</code></td>
+            <td>Ajoute une courbe spécifique sur le graphique (trace l'isotherme de Van der Waals, puis trace le palier rouge de saturation).</td>
+        </tr>
+        <tr>
+            <td>147-151</td>
             <td><code>fill='toself'</code></td>
-            <td>Propriété de Plotly équivalente à <code>plt.fill_between()</code>. Elle permet de remplir précisément l'aire sous la courbe (les deux aires de Maxwell en orange et vert).</td>
+            <td>Propriété graphique permettant de remplir et colorer précisément l'aire sous la courbe (coloration des aires de Maxwell en orange et vert).</td>
+        </tr>
+        <tr>
+            <td>157-160</td>
+            <td><code>st.columns(3)</code> / <code>col.metric(...)</code></td>
+            <td>Divise l'espace en 3 colonnes pour afficher les grandeurs clés (Pression, V_liq, V_gaz) sous forme de compteurs dynamiques esthétiques.</td>
+        </tr>
+        <tr>
+            <td>183</td>
+            <td><code>st.plotly_chart(fig)</code></td>
+            <td>Affiche le graphique Plotly finalisé au centre de l'interface web.</td>
+        </tr>
+        <tr>
+            <td>339-340</td>
+            <td><code>with open(__file__...) : st.code()</code></td>
+            <td>Permet au programme de s'auto-lire ! Il affiche dynamiquement son propre code source .</td>
         </tr>
     </table>
     """, unsafe_allow_html=True)
